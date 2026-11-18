@@ -3,20 +3,12 @@
 
   # SoundDock
 
-  **Your audio. One click away.**
-
   A lightweight Windows taskbar audio controller that keeps your current output and volume in view.
 
-  **Windows 10 / 11** &nbsp;|&nbsp; **C# + .NET 10** &nbsp;|&nbsp; **Portable** &nbsp;|&nbsp; **No telemetry**
+  **Windows 10 / 11** &nbsp;|&nbsp; **Portable** 
 
-  [Website](https://YOUR_USERNAME.github.io/SoundDock/) &nbsp;&middot;&nbsp; [Releases](https://github.com/YOUR_USERNAME/SoundDock/releases) &nbsp;&middot;&nbsp; [Build from source](#build-from-source)
+  [Website](https://YOUR_USERNAME.github.io/SoundDock/)
 </div>
-
-<p align="center">
-  <img src="docs/assets/preview.png" alt="Illustration of the SoundDock audio flyout and taskbar indicator" width="100%">
-</p>
-
-<p align="center"><sub>Interface illustration, not a captured screenshot of the Windows application.</sub></p>
 
 ## Why SoundDock?
 
@@ -32,7 +24,7 @@ Windows can make switching between speakers, headphones, and monitors take more 
 
 ## Installation
 
-### Option 1: Use a published release
+### Option 1: Use a release build
 
 Check the [Releases page](https://github.com/YOUR_USERNAME/SoundDock/releases) for a Windows build **if one has been published**. Download the appropriate portable package, extract the full folder to a permanent location, and run `SoundDock.exe`.
 
@@ -41,16 +33,7 @@ Check the [Releases page](https://github.com/YOUR_USERNAME/SoundDock/releases) f
 You need Windows and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 1. Clone or download this repository.
-2. Run `BUILD_AND_RUN.cmd` from the repository root.
-3. The published x64 executable will be created at `publish\win-x64\SoundDock.exe`.
-
-To build Windows ARM64 instead, run:
-
-```bat
-build.cmd win-arm64
-```
-
-The published executable includes its .NET runtime. **Keep the complete publish folder together** when moving or distributing it.
+2. Open the .sln and build from source code. 
 
 ## Controls
 
@@ -82,31 +65,9 @@ Settings and logs are saved locally:
 %LOCALAPPDATA%\SoundDock\errors.log
 ```
 
-Users upgrading from **BarTone** or **Taskbar Audio** can import their existing settings, including hidden outputs, custom labels, placement, and preferences.
-
 ## Technical notes
 
 - SoundDock uses Windows Core Audio to discover outputs, change the default playback endpoint, and manage audio sessions.
 - Taskbar placement relies on Windows Explorer internals rather than a supported public widget API. A major Windows update or a nonstandard taskbar can affect positioning; SoundDock can fall back to a floating indicator.
 - Applications explicitly assigned to a specific output in Windows may ignore a change to the system default output.
-- SoundDock does not collect telemetry or make network requests.
-
-## Repository layout
-
-```text
-SoundDock/       Windows Forms application (.NET 10)
-  Audio/         Playback devices, sessions, and Core Audio interop
-  UI/            Taskbar indicator and mixer flyout
-  Infrastructure/ Settings, startup, logging, and migration
-docs/            GitHub Pages website
-build.cmd        Publish a self-contained Windows build
-BUILD_AND_RUN.cmd Build and launch on x64 Windows
-```
-
-For a walkthrough of setting up the website, see **[GITHUB_SETUP.md](GITHUB_SETUP.md)**.
-
-## Development status
-
-The latest source has been reviewed for project structure and packaging, but **a compiled Windows build has not been verified in this environment**. Please build and test the program on a Windows machine before creating a public release.
-
-**Licensing:** This project package does not include a license. Add the license you want to use before publishing it as an open-source project.
+- SoundDock does not collect telemetry or make any network requests.
