@@ -22,6 +22,8 @@ Windows can make switching between speakers, headphones, and monitors take more 
 - **Personalization** - rename taskbar output labels and use your Windows accent color for sliders.
 - **Start with Windows** - enabled on first launch; optional afterward.
 
+ [ test.gif](https://github.com/polyvox-softworks/SoundDock/blob/514ca0290e4105c7b110121b64c51be331ba0e14/test.gif)
+
 ## Installation
 
 ### Option 1: Use a release build
