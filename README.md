@@ -26,7 +26,7 @@ Windows can make switching between speakers, headphones, and monitors take more 
 
 ### Option 1: Use a release build
 
-Check the [Releases page](https://github.com/polyvox-softworks/SoundDock/releases) for a Windows build. Download the appropriate portable package, extract the full folder to a permanent location, and run `SoundDock.exe`.
+Check the [Releases page](https://github.com/polyvox-softworks/SoundDock/releases) for a Windows build. Download the appropriate portable package, extract the full folder to a permanent location, and run the installer.
 
 ### Option 2: Build from source
 
