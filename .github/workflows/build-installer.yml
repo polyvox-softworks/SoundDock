@@ -1,4 +1,3 @@
-
 name: Build SoundDock installer
 run-name: SoundDock installer (direct build) - ${{ github.ref_name }}
 
@@ -39,11 +38,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet publish ./SoundDock/SoundDock.csproj -c Release -r win-x64 --self-contained true -o ./publish/win-x64 -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false
-
-          if ($LASTEXITCODE -ne 0) {
-            throw 'SoundDock publish failed.'
-          }
-
+          if ($LASTEXITCODE -ne 0) { throw 'SoundDock publish failed.' }
           if (-not (Test-Path -LiteralPath './publish/win-x64/SoundDock.exe')) {
             throw 'SoundDock.exe was not created by dotnet publish.'
           }
@@ -57,18 +52,11 @@ jobs:
             "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
             "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
           )
-
           $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-          $knownPath = $candidates | Where-Object {
-            Test-Path -LiteralPath $_
-          } | Select-Object -First 1
-
+          $knownPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           if (-not $compiler -and -not $knownPath) {
             choco install innosetup --yes --no-progress
-
-            if ($LASTEXITCODE -ne 0) {
-              throw 'Inno Setup installation failed.'
-            }
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
           }
 
       - name: Compile SoundDock installer
@@ -76,11 +64,7 @@ jobs:
         run: |
           [xml]$project = Get-Content './SoundDock/SoundDock.csproj' -Raw
           $versionNode = $project.SelectSingleNode('/Project/PropertyGroup/Version')
-
-          if (-not $versionNode) {
-            throw 'SoundDock.csproj has no Version property.'
-          }
-
+          if (-not $versionNode) { throw 'SoundDock.csproj has no Version property.' }
           $version = $versionNode.InnerText.Trim()
 
           $candidates = @(
@@ -89,33 +73,17 @@ jobs:
             "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
             "$env:ProgramFiles\Inno Setup 7\ISCC.exe"
           )
-
           $command = Get-Command ISCC.exe -ErrorAction SilentlyContinue
-
-          $compiler = if ($command) {
-            $command.Source
-          } else {
-            $candidates | Where-Object {
-              Test-Path -LiteralPath $_
-            } | Select-Object -First 1
+          $compiler = if ($command) { $command.Source } else {
+            $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           }
-
-          if (-not $compiler) {
-            throw 'Could not find ISCC.exe (Inno Setup compiler).'
-          }
+          if (-not $compiler) { throw 'Could not find ISCC.exe (Inno Setup compiler).' }
 
           & $compiler "/DAppVersion=$version" './SoundDock.iss'
-
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Inno Setup compiler failed.'
-          }
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compiler failed.' }
 
           $installer = "./dist/SoundDock-Setup-$version-win-x64.exe"
-
-          if (-not (Test-Path -LiteralPath $installer)) {
-            throw "Installer not found: $installer"
-          }
-
+          if (-not (Test-Path -LiteralPath $installer)) { throw "Installer not found: $installer" }
           Write-Host "Successfully created $installer"
           Get-FileHash -Algorithm SHA256 $installer | Format-List
 
@@ -135,24 +103,14 @@ jobs:
           [xml]$project = Get-Content './SoundDock/SoundDock.csproj' -Raw
           $version = $project.SelectSingleNode('/Project/PropertyGroup/Version').InnerText.Trim()
           $tag = $env:GITHUB_REF_NAME
-
           if ($tag -ne "v$version") {
             throw "Tag $tag must match SoundDock.csproj version v$version."
           }
-
-          $installer = (
-            Get-ChildItem './dist/SoundDock-Setup-*-win-x64.exe' |
-            Select-Object -First 1
-          ).FullName
-
+          $installer = (Get-ChildItem './dist/SoundDock-Setup-*-win-x64.exe' | Select-Object -First 1).FullName
           gh release view $tag *> $null
-
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $installer --clobber
           } else {
             gh release create $tag $installer --title "SoundDock $tag" --generate-notes
           }
-
-          if ($LASTEXITCODE -ne 0) {
-            throw 'Unable to upload GitHub release.'
-          }
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to upload GitHub release.' }

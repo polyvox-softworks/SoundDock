@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Drawing.Drawing2D;
 
 namespace SoundDock.UI;
@@ -6,9 +7,12 @@ namespace SoundDock.UI;
 internal sealed class RoundedActionButton : Button
 {
     private bool _hovered;
+    [DefaultValue(false)]
     public bool ShowExternalArrow { get; set; }
+    [DefaultValue(false)]
     public bool ShowSettingsIcon { get; set; }
     /// <summary>Draw a compact down chevron for actions that open a menu.</summary>
+    [DefaultValue(false)]
     public bool ShowDropdownChevron { get; set; }
 
     public RoundedActionButton(string text, string accessibleName)

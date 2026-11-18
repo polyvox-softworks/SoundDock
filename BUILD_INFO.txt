@@ -1,4 +1,5 @@
 SoundDock 1.4.0
+Based on: BarTone 1.0 / Taskbar Audio 1.7
 Target: .NET 10 / Windows 10 and 11 (WinForms)
 Platforms: win-x64, win-arm64
 
@@ -17,4 +18,3 @@ The taskbar indicator retains its wheel-to-volume shortcut.
 Flyout now uses a custom rounded dark scrollbar; Windows native light scrollbar is disabled.
 
 The flyout now mirrors the website preview, and right-click hides inactive outputs without a menu.
-Polyvox Softworks
