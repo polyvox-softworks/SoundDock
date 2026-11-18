@@ -540,14 +540,14 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
                     BeginInvoke(new Action(() =>
                     {
                         if (!control.IsDisposed && control.Focused)
-                            ScrollControlIntoView(control);
+                            EnsureFocusedControlVisible(control);
                     }));
             };
         foreach (Control child in control.Controls)
             WatchFocus(child);
     }
 
-    private void ScrollControlIntoView(Control control)
+    private void EnsureFocusedControlVisible(Control control)
     {
         if (!Visible || _layoutRunning || _naturalHeight <= _body.ClientSize.Height) return;
         int top = _body.PointToClient(control.PointToScreen(Point.Empty)).Y;
