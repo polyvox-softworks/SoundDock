@@ -33,7 +33,11 @@ jobs:
 
       - name: Publish app and compile installer
         shell: pwsh
-        run: ./build-installer.ps1
+        run: |
+          if (-not (Test-Path ".\SoundDock\SoundDock.csproj")) {
+            throw "SoundDock project missing. Upload the app source alongside the installer files."
+          }
+          .\build-installer.ps1
 
       - name: Verify installer
         shell: pwsh
