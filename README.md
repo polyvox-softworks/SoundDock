@@ -7,7 +7,7 @@
 
   **Windows 10 / 11** &nbsp;|&nbsp; **Portable** 
 
-  [Website](https://YOUR_USERNAME.github.io/SoundDock/)
+  [Website](https://polyvox.dev/SoundDock/)
 </div>
 
 ## Why SoundDock?
@@ -26,7 +26,7 @@ Windows can make switching between speakers, headphones, and monitors take more 
 
 ### Option 1: Use a release build
 
-Check the [Releases page](https://github.com/YOUR_USERNAME/SoundDock/releases) for a Windows build **if one has been published**. Download the appropriate portable package, extract the full folder to a permanent location, and run `SoundDock.exe`.
+Check the [Releases page](https://github.com/polyvox-softworks/SoundDock/releases) for a Windows build. Download the appropriate portable package, extract the full folder to a permanent location, and run `SoundDock.exe`.
 
 ### Option 2: Build from source
 
