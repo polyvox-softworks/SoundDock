@@ -1,0 +1,20 @@
+SoundDock 1.4.0
+Target: .NET 10 / Windows 10 and 11 (WinForms)
+Platforms: win-x64, win-arm64
+
+Build on Windows with BUILD_AND_RUN.cmd or build.cmd.
+No third-party NuGet dependencies.
+
+This project was renamed and checked on a Linux environment without the .NET SDK.
+Compilation and runtime behavior still require Windows validation.
+
+Startup defaults on at first launch, with a saved initialization marker
+so disabling it later is respected.
+
+Flyout wheel input now scrolls lists instead of adjusting volume.
+The taskbar indicator retains its wheel-to-volume shortcut.
+
+Flyout now uses a custom rounded dark scrollbar; Windows native light scrollbar is disabled.
+
+The flyout now mirrors the website preview, and right-click hides inactive outputs without a menu.
+Polyvox Softworks
