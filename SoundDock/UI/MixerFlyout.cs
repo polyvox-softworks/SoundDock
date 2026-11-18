@@ -10,15 +10,19 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
     private readonly Panel _header = new();
     private readonly Panel _footer = new();
     private readonly Panel _body = new();
+    private readonly FluentScrollBar _scrollBar = new();
     private readonly Panel _outputDivider = new();
     private readonly Panel _appsDivider = new();
     private readonly Label _title = new();
     private readonly Button _close;
     private readonly Button _settings;
     private readonly Button _hiddenButton;
-    private readonly ContextMenuStrip _deviceMenu = new();
-    private readonly ContextMenuStrip _hiddenMenu = new();
+    private readonly RoundedGroupPanel _hiddenPanel = new();
+    private readonly List<HiddenRestoreButton> _restoreButtons = [];
+    private readonly HiddenRestoreButton _restoreAllButton = new("Show all outputs");
+    private readonly Label _hiddenHint = new();
     private readonly Label _deviceHeading = new();
+    private readonly Label _volumeHeading = new();
     private readonly Label _appHeading = new();
     private readonly Label _emptyDevices = new();
     private readonly Label _emptySessions = new();
@@ -27,18 +31,22 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
     private readonly List<DeviceButton> _deviceButtons = [];
     private readonly Dictionary<string, MixerRow> _sessionRows = new(StringComparer.Ordinal);
     private readonly ToolTip _toolTip = new() { AutoPopDelay = 10000, InitialDelay = 450 };
-    private readonly Font _headingFont = new("Segoe UI", 9f, FontStyle.Bold);
-    private readonly Font _titleFont = new("Segoe UI Semibold", 13.5f, FontStyle.Regular);
-    private readonly Font _smallFont = new("Segoe UI", 9f);
-    private readonly Font _bodyFont = new("Segoe UI", 9.5f);
+    private readonly Font _headingFont = new("Segoe UI", 8.5f);
+    private readonly Font _titleFont = new("Segoe UI Semibold", 10f);
+    private readonly Font _smallFont = new("Segoe UI", 8.5f);
+    private readonly Font _bodyFont = new("Segoe UI", 9f);
     private AudioSnapshot _snapshot = AudioSnapshot.Empty();
     private IReadOnlyDictionary<string, string> _hiddenOutputs = new Dictionary<string, string>();
     private string _devicesKey = "";
     private string _sessionsKey = "";
+    private string _hiddenKey = "";
+    private bool _hiddenExpanded;
     private string? _audioError;
     private DateTime _statusUntil;
     private Point _anchor;
     private int _naturalHeight;
+    private int _scrollOffset;
+    private bool _scrollBarNeeded;
     private bool _layoutRunning;
     private bool _opening;
     private bool _hasStatus;
@@ -70,17 +78,25 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
         Font = _bodyFont;
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96, 96);
-        ClientSize = new Size(354, 340);
+        ClientSize = new Size(344, 340);
         Padding = new Padding(1);
         DoubleBuffered = true;
 
         _header.Dock = DockStyle.Top;
-        _header.Height = 54;
+        _header.Height = 49;
+        _header.BackColor = Theme.Background;
         _footer.Dock = DockStyle.Bottom;
-        _footer.Height = 42;
+        _footer.Height = 58;
+        _footer.BackColor = Theme.Background;
         _body.Dock = DockStyle.Fill;
-        _body.AutoScroll = true;
+        _body.BackColor = Theme.Background;
+        // Manage scrolling ourselves so Windows does not draw a bright native scrollbar.
+        _body.AutoScroll = false;
         _body.TabStop = false;
+        _scrollBar.Width = S(12);
+        _scrollBar.Visible = false;
+        _scrollBar.ScrollRequested += ScrollTo;
+        _body.Controls.Add(_scrollBar);
         Controls.AddRange([_body, _footer, _header]);
 
         ConfigureLabel(_title, "Sound", Theme.Text, _titleFont);
@@ -90,7 +106,8 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
 
         _settings = new RoundedActionButton("More sound settings", "Open Windows sound settings")
         {
-            ShowExternalArrow = true
+            ShowExternalArrow = true,
+            ShowSettingsIcon = true
         };
         _settings.Font = _smallFont;
         _settings.TextAlign = ContentAlignment.MiddleLeft;
@@ -99,44 +116,32 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
         _footer.Paint += (_, e) =>
         {
             using var pen = new Pen(Theme.Border);
-            e.Graphics.DrawLine(pen, S(18), 0, _footer.Width - S(18), 0);
+            e.Graphics.DrawLine(pen, 0, 0, _footer.Width, 0);
         };
 
-        ConfigureLabel(_deviceHeading, "Output", Theme.Muted, _headingFont);
+        ConfigureLabel(_deviceHeading, "Output", Color.FromArgb(190, 190, 190), _headingFont);
+        ConfigureLabel(_volumeHeading, "Volume", Color.FromArgb(190, 190, 190), _headingFont);
         _hiddenButton = new RoundedActionButton("Hidden devices (0)", "Restore hidden sound outputs")
         {
             Font = _smallFont,
             ShowDropdownChevron = true,
-            Visible = false,
+            Visible = false
         };
-        _hiddenButton.Click += (_, _) => ShowHiddenMenu();
-        _deviceMenu.Renderer = new DarkMenuRenderer();
-        _deviceMenu.BackColor = Theme.Background;
-        _deviceMenu.ForeColor = Theme.Text;
-        _deviceMenu.ShowImageMargin = false;
-        _deviceMenu.Opening += (_, e) =>
+        _hiddenButton.Click += (_, _) =>
         {
-            _deviceMenu.Items.Clear();
-            if (_deviceMenu.SourceControl is not DeviceButton button)
-            {
-                e.Cancel = true;
-                return;
-            }
-            var hide = new ToolStripMenuItem("Hide from output list", null,
-                (_, _) => BeginInvoke(new Action(() => OutputHiddenRequested?.Invoke(button.Device.Id))));
-            // Always keep the selected endpoint visible. Otherwise a user could
-            // hide their sole active speaker and lose the means to switch back.
-            hide.Enabled = !button.Device.IsDefault;
-            hide.ToolTipText = button.Device.IsDefault
-                ? "Switch to another output before hiding this one."
-                : "Hide this output until you restore it from Hidden.";
-            _deviceMenu.Items.Add(hide);
+            _hiddenExpanded = !_hiddenExpanded;
+            _hiddenPanel.Visible = _hiddenExpanded;
+            LayoutBody();
+            FitToScreen();
         };
-        _hiddenMenu.Renderer = new DarkMenuRenderer();
-        _hiddenMenu.BackColor = Theme.Background;
-        _hiddenMenu.ForeColor = Theme.Text;
-        _hiddenMenu.ShowImageMargin = false;
-        ConfigureLabel(_appHeading, "App volume", Theme.Muted, _headingFont);
+
+        _hiddenPanel.Visible = false;
+        ConfigureLabel(_hiddenHint, "Right-click an inactive output to hide it.", Theme.Muted, _smallFont);
+        _hiddenHint.TextAlign = ContentAlignment.MiddleLeft;
+        _restoreAllButton.Click += (_, _) =>
+            BeginInvoke(new Action(() => ShowAllOutputsRequested?.Invoke()));
+        _hiddenPanel.Controls.AddRange([_restoreAllButton, _hiddenHint]);
+        ConfigureLabel(_appHeading, "App volume", Color.FromArgb(190, 190, 190), _headingFont);
         ConfigureLabel(_emptyDevices, "No connected output devices", Theme.Muted, _smallFont);
         ConfigureLabel(_emptySessions, "Apps playing sound will appear here.", Theme.Muted, _smallFont);
         ConfigureLabel(_status, "", Theme.Text, _smallFont);
@@ -144,24 +149,25 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
         _appsDivider.BackColor = Theme.Border;
         _status.Visible = false;
         _status.AccessibleRole = AccessibleRole.StaticText;
-        _master = new MixerRow("Volume", "", master: true);
+        _master = new MixerRow("System volume", "", master: true);
         _master.TabIndex = 20;
         _master.VolumeChanged += value => MasterVolumeChanged?.Invoke(value);
         _master.MuteRequested += muted => MasterMuteRequested?.Invoke(muted);
-        _body.Controls.AddRange([_deviceHeading, _hiddenButton, _appHeading, _emptyDevices, _emptySessions,
+        _body.Controls.AddRange([_deviceHeading, _hiddenButton, _hiddenPanel,
+            _volumeHeading, _appHeading, _emptyDevices, _emptySessions,
             _outputDivider, _appsDivider, _master, _status]);
-        _hiddenButton.BringToFront(); // do not let the heading label intercept its clicks
+        _hiddenButton.BringToFront();
+        _scrollBar.BringToFront();
+        WatchFocus(_hiddenButton);
+        WatchFocus(_restoreAllButton);
+        WatchFocus(_master);
 
         _body.SizeChanged += (_, _) => LayoutBody();
-        // WinForms delivers wheel input to the focused child on some Windows
-        // versions and to the hovered child on others. Routing once, by the
-        // pointer location, makes the entire volume row respond consistently.
+        // Wheel input scrolls the output/app list, regardless of which child is focused.
         Application.AddMessageFilter(this);
         Deactivate += (_, _) =>
         {
-            // ToolStrip context menus are separate native popup windows. Do
-            // not dismiss their owner while a hide/restore menu is displayed.
-            if (!_opening && !_deviceMenu.Visible && !_hiddenMenu.Visible) Dismiss();
+            if (!_opening) Dismiss();
         };
     }
 
@@ -186,10 +192,8 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
             foreach (var row in _sessionRows.Values) row.CancelInteraction();
         }
         _snapshot = snapshot;
-        if (endpointChanged) { _wheelRow = null; _wheelRemainder = 0; }
         _hiddenOutputs = hiddenOutputs ?? new Dictionary<string, string>();
-        _hiddenButton.Visible = _hiddenOutputs.Count > 0;
-        _hiddenButton.Text = $"Hidden devices ({_hiddenOutputs.Count})";
+        bool hiddenChanged = RefreshHiddenOutputs();
         _master.Enabled = snapshot.HasOutput;
         _master.Subtitle = snapshot.DefaultDeviceName ?? "No output available";
         _master.ApplyValue(Percent(snapshot.MasterVolume), snapshot.MasterMuted);
@@ -208,7 +212,7 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
             bool changed = devicesKey != _devicesKey || sessionsKey != _sessionsKey;
             if (devicesKey != _devicesKey) RebuildDevices(visibleDevices, devicesKey);
             if (sessionsKey != _sessionsKey) RebuildSessions(snapshot.Sessions, sessionsKey);
-            if (changed) { LayoutBody(); FitToScreen(); }
+            if (changed || hiddenChanged) { LayoutBody(); FitToScreen(); }
         }
 
         foreach (var session in snapshot.Sessions)
@@ -224,52 +228,99 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
 
     private static int Percent(float volume) => (int)Math.Round(Math.Clamp(volume, 0f, 1f) * 100);
 
+    private bool RefreshHiddenOutputs()
+    {
+        string key = string.Join("\n", _hiddenOutputs.OrderBy(item => item.Key, StringComparer.Ordinal)
+            .Select(item => item.Key + "\t" + item.Value));
+        if (key == _hiddenKey) return false;
+
+        _hiddenKey = key;
+        _hiddenButton.Visible = _hiddenOutputs.Count > 0;
+        _hiddenButton.Text = $"Hidden devices ({_hiddenOutputs.Count})";
+        if (_hiddenOutputs.Count == 0) _hiddenExpanded = false;
+        _hiddenPanel.Visible = _hiddenExpanded;
+
+        foreach (var button in _restoreButtons)
+        {
+            _hiddenPanel.Controls.Remove(button);
+            button.Dispose();
+        }
+        _restoreButtons.Clear();
+
+        foreach (var entry in _hiddenOutputs.OrderBy(item => item.Value,
+                     StringComparer.CurrentCultureIgnoreCase))
+        {
+            string id = entry.Key;
+            string name = _snapshot.Devices.FirstOrDefault(device => device.Id == id)?.Name ?? entry.Value;
+            var button = new HiddenRestoreButton("Show " + name);
+            button.AccessibleName = "Restore " + name;
+            button.Click += (_, _) => BeginInvoke(new Action(() => OutputUnhiddenRequested?.Invoke(id)));
+            _hiddenPanel.Controls.Add(button);
+            _restoreButtons.Add(button);
+            WatchFocus(button);
+        }
+        _restoreAllButton.Visible = _restoreButtons.Count > 1;
+        return true;
+    }
+
     private void RebuildDevices(IReadOnlyList<AudioDevice> devices, string key)
     {
         _body.SuspendLayout();
         foreach (var control in _deviceButtons)
         {
             _toolTip.SetToolTip(control, null);
-            control.ContextMenuStrip = null; // the shared menu belongs to this flyout
             _body.Controls.Remove(control);
             control.Dispose();
         }
         _deviceButtons.Clear();
         foreach (var device in devices)
         {
-            var button = new DeviceButton(device);
-            button.ContextMenuStrip = _deviceMenu;
             string id = device.Id;
+            var button = new DeviceButton(device);
             button.Click += (_, _) => OutputSelected?.Invoke(id);
+            button.HideRequested += () =>
+            {
+                // Rebuild the list after the mouse event has finished.
+                if (IsHandleCreated && !IsDisposed)
+                    BeginInvoke(new Action(() => OutputHiddenRequested?.Invoke(id)));
+            };
             button.TabIndex = _deviceButtons.Count;
             _toolTip.SetToolTip(button, device.Name +
-                (device.IsCommunicationsDefault ? "\nDefault output for calls" : "") +
-                (device.IsDefault ? "" : "\nRight-click to hide this output"));
+                (device.IsDefault ? "\nActive output. Switch first to hide it." : "\nRight-click to hide immediately."));
             _deviceButtons.Add(button);
             _body.Controls.Add(button);
+            WatchFocus(button);
         }
+        _scrollBar.BringToFront();
         _devicesKey = key;
         _body.ResumeLayout(false);
     }
 
-    private void ShowHiddenMenu()
+    private int HiddenPanelHeight()
     {
-        _hiddenMenu.Items.Clear();
-        if (_hiddenOutputs.Count == 0) return;
-        foreach (var hidden in _hiddenOutputs.OrderBy(item => item.Value,
-                     StringComparer.CurrentCultureIgnoreCase))
+        int count = _restoreButtons.Count;
+        if (count == 0) return 0;
+        int height = S(16) + count * S(31) + (count - 1) * S(3) + S(29);
+        if (count > 1) height += S(34);
+        return height;
+    }
+
+    private void LayoutHiddenPanel()
+    {
+        int padding = S(8);
+        int width = Math.Max(S(80), _hiddenPanel.Width - 2 * padding);
+        int y = padding;
+        foreach (var button in _restoreButtons)
         {
-            string id = hidden.Key;
-            string name = _snapshot.Devices.FirstOrDefault(device => device.Id == id)?.Name ?? hidden.Value;
-            var item = new ToolStripMenuItem("Show " + name, null,
-                (_, _) => BeginInvoke(new Action(() => OutputUnhiddenRequested?.Invoke(id))));
-            item.ToolTipText = "Restore this output to the list";
-            _hiddenMenu.Items.Add(item);
+            button.SetBounds(padding, y, width, S(31));
+            y += S(34);
         }
-        _hiddenMenu.Items.Add(new ToolStripSeparator());
-        _hiddenMenu.Items.Add(new ToolStripMenuItem("Show all outputs", null,
-            (_, _) => BeginInvoke(new Action(() => ShowAllOutputsRequested?.Invoke()))));
-        _hiddenMenu.Show(_hiddenButton, new Point(0, _hiddenButton.Height));
+        if (_restoreAllButton.Visible)
+        {
+            _restoreAllButton.SetBounds(padding, y, width, S(31));
+            y += S(34);
+        }
+        _hiddenHint.SetBounds(padding + S(3), y, width - S(6), S(25));
     }
 
     /// <summary>Update master audio without rebuilding app sliders while dragging.</summary>
@@ -280,8 +331,6 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
 
     private void RebuildSessions(IReadOnlyList<AudioSession> sessions, string key)
     {
-        _wheelRow = null;
-        _wheelRemainder = 0;
         _body.SuspendLayout();
         foreach (var row in _sessionRows.Values)
         {
@@ -300,7 +349,9 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
             _toolTip.SetToolTip(row, session.Name + (session.ProcessId == 0 ? "" : $" · Process {session.ProcessId}"));
             _sessionRows.Add(id, row);
             _body.Controls.Add(row);
+            WatchFocus(row);
         }
+        _scrollBar.BringToFront();
         _sessionsKey = key;
         _body.ResumeLayout(false);
     }
@@ -325,13 +376,14 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
 
     public void ShowNear(Point anchor)
     {
+        _scrollRemainder = 0;
         _anchor = anchor;
         _opening = true;
         try
         {
             // Place the hidden window on the correct monitor before Windows chooses its DPI.
             var work = Screen.FromPoint(anchor).WorkingArea;
-            if (!Visible) Location = new Point(work.Right - S(364), work.Bottom - S(470));
+            if (!Visible) Location = new Point(work.Right - S(354), work.Bottom - S(470));
             _ = Handle;
             LayoutBody();
             FitToScreen();
@@ -348,8 +400,7 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
     public void Dismiss()
     {
         if (!Visible) return;
-        _wheelRow = null;
-        _wheelRemainder = 0;
+        _scrollRemainder = 0;
         _master.CancelInteraction();
         foreach (var row in _sessionRows.Values) row.CancelInteraction();
         Hide();
@@ -360,9 +411,9 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
     {
         if (!IsHandleCreated) return;
         var work = Screen.FromPoint(_anchor).WorkingArea;
-        int width = Math.Min(S(354), Math.Max(S(220), work.Width - S(24)));
+        int width = Math.Min(S(344), Math.Max(S(220), work.Width - S(24)));
         int maximumHeight = Math.Max(S(170), work.Height - S(24));
-        int height = Math.Min(Math.Min(S(670), maximumHeight), Math.Max(S(190), _naturalHeight + S(100)));
+        int height = Math.Min(Math.Min(S(670), maximumHeight), Math.Max(S(190), _naturalHeight + S(107)));
         if (ClientSize != new Size(width, height)) ClientSize = new Size(width, height);
         int x = Math.Clamp(_anchor.X - Width + S(28), work.Left + S(8), Math.Max(work.Left + S(8), work.Right - Width - S(8)));
         int preferredY = _anchor.Y - Height - S(10);
@@ -375,11 +426,11 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
     {
         base.OnLayout(levent);
         if (_close is null || _master is null) return;
-        _header.Height = S(54);
-        _footer.Height = S(42);
-        _title.SetBounds(S(19), S(11), _header.Width - S(80), S(32));
-        _close.SetBounds(_header.Width - S(43), S(10), S(29), S(29));
-        _settings.SetBounds(S(14), S(5), S(214), S(31));
+        _header.Height = S(49);
+        _footer.Height = S(58);
+        _title.SetBounds(S(18), S(7), _header.Width - S(76), S(35));
+        _close.SetBounds(_header.Width - S(40), S(10), S(29), S(29));
+        _settings.SetBounds(S(17), S(11), Math.Max(S(110), _footer.Width - S(34)), S(32));
         LayoutBody();
     }
 
@@ -390,54 +441,122 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
         _body.SuspendLayout();
         try
         {
-            int margin = S(16);
-            int width = Math.Max(S(180), _body.ClientSize.Width - 2 * margin);
-            int scroll = _body.AutoScrollPosition.Y;
-            int y = S(2);
-            void Place(Control control, int height)
+            LayoutContent(_scrollBarNeeded);
+            bool needed = _naturalHeight > _body.ClientSize.Height;
+            if (needed != _scrollBarNeeded)
             {
-                control.SetBounds(margin, y + scroll, width, height);
-                y += height;
+                _scrollBarNeeded = needed;
+                LayoutContent(needed);
             }
-            Place(_deviceHeading, S(24));
-            // Control.Visible reports false when the flyout itself is hidden;
-            // the saved hidden-device count is the reliable layout condition.
-            if (_hiddenOutputs.Count > 0)
-            {
-                // Use the same 214x31 logical dimensions, shape and padding as
-                // the footer's "More sound settings" action. Keeping this on
-                // its own row avoids compressing it beside the Output heading.
-                _hiddenButton.SetBounds(margin, y + scroll + S(5), Math.Min(S(214), width), S(31));
-                y += S(42);
-            }
-            if (_deviceButtons.Count == 0) Place(_emptyDevices, S(40));
-            foreach (var button in _deviceButtons) { Place(button, S(46)); y += S(2); }
-            y += S(8);
-            Place(_outputDivider, S(1));
-            y += S(12);
-            Place(_master, S(70));
-            y += S(10);
-            Place(_appsDivider, S(1));
-            y += S(12);
-            Place(_appHeading, S(24));
-            if (_sessionRows.Count == 0) Place(_emptySessions, S(41));
-            foreach (var row in _sessionRows.Values) { Place(row, S(65)); y += S(2); }
-            if (_hasStatus)
-            {
-                y += S(8);
-                int statusHeight = Math.Max(S(30), TextRenderer.MeasureText(_status.Text, _status.Font,
-                    new Size(width, int.MaxValue), TextFormatFlags.WordBreak).Height + S(6));
-                Place(_status, statusHeight);
-            }
-            y += S(8);
-            _naturalHeight = y;
-            _body.AutoScrollMinSize = new Size(0, y);
+
+            _scrollBar.SetBounds(Math.Max(0, _body.ClientSize.Width - _scrollBar.Width),
+                0, _scrollBar.Width, _body.ClientSize.Height);
+            _scrollBar.Visible = needed;
+            int limit = Math.Max(0, _naturalHeight - _body.ClientSize.Height);
+            if (_scrollOffset > limit) ScrollTo(limit);
+            _scrollBar.UpdateRange(_naturalHeight, _body.ClientSize.Height, _scrollOffset);
+            _scrollBar.BringToFront();
         }
         finally
         {
             _body.ResumeLayout(false);
             _layoutRunning = false;
         }
+    }
+
+    private void LayoutContent(bool reserveScrollBar)
+    {
+        int margin = S(18);
+        int available = _body.ClientSize.Width - (reserveScrollBar ? _scrollBar.Width : 0);
+        int width = Math.Max(S(175), available - 2 * margin);
+        int y = S(5);
+        void Place(Control control, int height)
+        {
+            control.SetBounds(margin, y - _scrollOffset, width, height);
+            y += height;
+        }
+
+        Place(_deviceHeading, S(26));
+        if (_deviceButtons.Count == 0) Place(_emptyDevices, S(40));
+        foreach (var button in _deviceButtons) { Place(button, S(36)); y += S(2); }
+        if (_hiddenOutputs.Count > 0)
+        {
+            y += S(8);
+            Place(_hiddenButton, S(32));
+            if (_hiddenExpanded)
+            {
+                y += S(5);
+                Place(_hiddenPanel, HiddenPanelHeight());
+                LayoutHiddenPanel();
+            }
+        }
+        y += S(13);
+        Place(_outputDivider, S(1));
+        y += S(13);
+        Place(_volumeHeading, S(25));
+        Place(_master, S(52));
+        y += S(13);
+        Place(_appsDivider, S(1));
+        y += S(12);
+        Place(_appHeading, S(26));
+        if (_sessionRows.Count == 0) Place(_emptySessions, S(41));
+        foreach (var row in _sessionRows.Values) { Place(row, S(62)); y += S(5); }
+        if (_hasStatus)
+        {
+            y += S(8);
+            int statusHeight = Math.Max(S(30), TextRenderer.MeasureText(_status.Text, _status.Font,
+                new Size(width, int.MaxValue), TextFormatFlags.WordBreak).Height + S(6));
+            Place(_status, statusHeight);
+        }
+        _naturalHeight = y + S(8);
+    }
+
+    private void ScrollTo(int requestedOffset)
+    {
+        int maximum = Math.Max(0, _naturalHeight - _body.ClientSize.Height);
+        int next = Math.Clamp(requestedOffset, 0, maximum);
+        int delta = next - _scrollOffset;
+        if (delta == 0) return;
+        _scrollOffset = next;
+        _body.SuspendLayout();
+        try
+        {
+            foreach (Control control in _body.Controls)
+                if (!ReferenceEquals(control, _scrollBar))
+                    control.Top -= delta;
+        }
+        finally { _body.ResumeLayout(false); }
+        _scrollBar.SetScrollPosition(_scrollOffset);
+    }
+
+    // Keep Tab navigation useful when the list is taller than the flyout.
+    private void WatchFocus(Control control)
+    {
+        if (control.TabStop)
+            control.Enter += (_, _) =>
+            {
+                // Only keyboard focus moves the view; mouse clicks must not shift a slider.
+                if (IsHandleCreated && Control.MouseButtons == MouseButtons.None)
+                    BeginInvoke(new Action(() =>
+                    {
+                        if (!control.IsDisposed && control.Focused)
+                            ScrollControlIntoView(control);
+                    }));
+            };
+        foreach (Control child in control.Controls)
+            WatchFocus(child);
+    }
+
+    private void ScrollControlIntoView(Control control)
+    {
+        if (!Visible || _layoutRunning || _naturalHeight <= _body.ClientSize.Height) return;
+        int top = _body.PointToClient(control.PointToScreen(Point.Empty)).Y;
+        int bottom = top + control.Height;
+        int padding = S(5);
+        if (top < padding)
+            ScrollTo(_scrollOffset + top - padding);
+        else if (bottom > _body.ClientSize.Height - padding)
+            ScrollTo(_scrollOffset + bottom - _body.ClientSize.Height + padding);
     }
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
@@ -459,6 +578,7 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
     protected override void OnDpiChanged(DpiChangedEventArgs e)
     {
         base.OnDpiChanged(e);
+        _scrollBar.Width = S(12);
         LayoutBody();
         FitToScreen();
     }
@@ -498,8 +618,6 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
         {
             Application.RemoveMessageFilter(this);
             _toolTip.Dispose();
-            _deviceMenu.Dispose();
-            _hiddenMenu.Dispose();
         }
         base.Dispose(disposing);
         if (disposing)
@@ -515,20 +633,40 @@ internal sealed partial class MixerFlyout : Form, IMessageFilter
 internal sealed class DeviceButton : Button
 {
     public AudioDevice Device { get; }
+    public event Action? HideRequested;
     private bool _hovered;
-    private readonly Font _nameFont = new("Segoe UI", 10f);
+    private readonly Font _nameFont = new("Segoe UI", 9f);
 
     public DeviceButton(AudioDevice device)
     {
         Device = device;
         Text = device.Name;
         AccessibleName = device.Name;
-        AccessibleDescription = device.IsDefault ? "Current default sound output" : "Switch sound output to " + device.Name;
+        AccessibleDescription = device.IsDefault
+            ? "Current output. Select another output before hiding this one."
+            : "Click to switch output, or right-click to hide it.";
         Cursor = Cursors.Hand;
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
         TabStop = true;
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer, true);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right) return;
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Right)
+        {
+            if (!Device.IsDefault) HideRequested?.Invoke();
+            return;
+        }
+        base.OnMouseUp(e);
     }
 
     protected override void OnMouseEnter(EventArgs e) { _hovered = true; Invalidate(); base.OnMouseEnter(e); }
@@ -538,37 +676,33 @@ internal sealed class DeviceButton : Button
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var graphics = e.Graphics;
-        graphics.Clear(Theme.Background);
-        graphics.SmoothingMode = SmoothingMode.AntiAlias;
+        var g = e.Graphics;
+        g.Clear(Theme.Background);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
         int S(int value) => (int)Math.Round(value * DeviceDpi / 96f);
         if (Device.IsDefault || _hovered || Focused)
         {
-            using var shape = Theme.RoundedRectangle(new RectangleF(1f, 1f, Width - 2f, Height - 2f), S(6));
-            using var background = new SolidBrush(Device.IsDefault ? Theme.Selected : Theme.Hover);
-            graphics.FillPath(background, shape);
+            using var path = Theme.RoundedRectangle(new RectangleF(0, 0, Width - 1, Height - 1), S(5));
+            using var fill = new SolidBrush(Device.IsDefault ? Theme.Selected : Color.FromArgb(53, 53, 53));
+            g.FillPath(fill, path);
         }
+        Theme.DrawFluentSpeaker(g,
+            new RectangleF(S(10), (Height - S(17)) / 2f, S(17), S(17)),
+            Theme.Text, false, 70);
+        TextRenderer.DrawText(g, Device.Name, _nameFont,
+            new Rectangle(S(39), 0, Math.Max(1, Width - S(77)), Height), Theme.Text,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+            TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
         if (Device.IsDefault)
         {
-            using var selection = new SolidBrush(Theme.Accent);
-            using var selectionPath = Theme.RoundedRectangle(new RectangleF(S(2), S(11), S(3), Height - S(22)), S(2));
-            graphics.FillPath(selection, selectionPath);
-        }
-        var iconColor = Device.IsDefault ? Theme.Text : Theme.Muted;
-        Theme.DrawFluentSpeaker(graphics,
-            new RectangleF(S(12), (Height - S(21)) / 2f, S(21), S(21)), iconColor, false, 70);
-        TextRenderer.DrawText(graphics, Device.Name, _nameFont,
-            new Rectangle(S(42), 0, Math.Max(1, Width - S(78)), Height), Theme.Text,
-            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
-        if (Device.IsDefault)
-        {
-            using var pen = new Pen(Theme.Text, Math.Max(1.5f, S(2)))
-                { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
-            int x = Width - S(24), y = Height / 2;
-            graphics.DrawLines(pen, [new Point(x - S(4), y), new Point(x, y + S(4)), new Point(x + S(7), y - S(5))]);
+            using var pen = new Pen(Theme.Accent, Math.Max(1.5f, S(1)))
+            { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round };
+            int x = Width - S(21), y = Height / 2;
+            g.DrawLines(pen, [new Point(x - S(4), y),
+                new Point(x - S(1), y + S(3)), new Point(x + S(6), y - S(5))]);
         }
         if (Focused && ShowFocusCues)
-            ControlPaint.DrawFocusRectangle(graphics, ClientRectangle, Theme.Text, Theme.Background);
+            ControlPaint.DrawFocusRectangle(g, ClientRectangle, Theme.Text, Theme.Background);
     }
 
     protected override void Dispose(bool disposing)
@@ -584,8 +718,8 @@ internal sealed class MixerRow : Panel
     private readonly Label _percentage = new();
     private readonly VolumeSlider _slider = new();
     private readonly MuteButton _mute = new();
-    private readonly Font _nameFont = new("Segoe UI", 9.5f);
-    private readonly Font _smallFont = new("Segoe UI", 9f);
+    private readonly Font _nameFont = new("Segoe UI", 9f);
+    private readonly Font _smallFont = new("Segoe UI", 8.5f);
     private string _subtitle = "";
 
     public event Action<int>? VolumeChanged;
@@ -605,7 +739,7 @@ internal sealed class MixerRow : Panel
         _name.AutoEllipsis = true;
         _name.UseMnemonic = false;
         _percentage.Font = _smallFont;
-        _percentage.ForeColor = Theme.Muted;
+        _percentage.ForeColor = Color.FromArgb(201, 201, 201);
         _percentage.TextAlign = ContentAlignment.MiddleRight;
         _slider.AccessibleName = name + " volume";
         _mute.AccessibleName = "Mute " + name;
@@ -624,16 +758,9 @@ internal sealed class MixerRow : Panel
     {
         _slider.SetValueSilently(value);
         _percentage.Text = (_slider.IsInteracting ? _slider.Value : value) + "%";
-        _percentage.ForeColor = muted ? Theme.Muted : Theme.Text;
+        _percentage.ForeColor = muted ? Theme.Muted : Color.FromArgb(201, 201, 201);
         _mute.Muted = muted;
         _mute.AccessibleName = (muted ? "Unmute " : "Mute ") + _name.Text;
-    }
-
-    /// <summary>Adjust from a wheel step using the same event as dragging.</summary>
-    public void AdjustVolume(int percentStep)
-    {
-        if (!Enabled || _slider.IsInteracting || percentStep == 0) return;
-        _slider.Value = Math.Clamp(_slider.Value + percentStep, 0, 100);
     }
 
     public void CancelInteraction() { _slider.Capture = false; }
@@ -643,11 +770,10 @@ internal sealed class MixerRow : Panel
         base.OnLayout(levent);
         if (_slider is null) return;
         int S(int value) => (int)Math.Round(value * DeviceDpi / 96f);
-        _name.SetBounds(S(8), S(3), Math.Max(S(40), Width - S(92)), S(23));
-        _percentage.SetBounds(Width - S(74), S(3), S(64), S(23));
-        int y = S(27);
-        _mute.SetBounds(S(2), y, S(30), S(31));
-        _slider.SetBounds(S(38), y, Math.Max(S(60), Width - S(42)), S(31));
+        _mute.SetBounds(0, S(1), S(22), S(23));
+        _name.SetBounds(S(28), S(1), Math.Max(S(30), Width - S(103)), S(23));
+        _percentage.SetBounds(Width - S(65), S(1), S(65), S(23));
+        _slider.SetBounds(0, S(27), Math.Max(S(60), Width), S(24));
     }
 
     protected override void Dispose(bool disposing)

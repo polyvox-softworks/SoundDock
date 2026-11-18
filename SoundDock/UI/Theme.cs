@@ -7,10 +7,10 @@ namespace SoundDock.UI;
 
 internal static class Theme
 {
-    internal static readonly Color Background = Color.FromArgb(36, 36, 36);
-    internal static readonly Color Surface = Color.FromArgb(43, 43, 43);
+    internal static readonly Color Background = Color.FromArgb(35, 35, 35);
+    internal static readonly Color Surface = Color.FromArgb(41, 41, 41);
     internal static readonly Color Hover = Color.FromArgb(57, 57, 57);
-    internal static readonly Color Selected = Color.FromArgb(48, 53, 58);
+    internal static readonly Color Selected = Color.FromArgb(49, 53, 57);
     internal static readonly Color Border = Color.FromArgb(70, 70, 70);
     internal static readonly Color Text = Color.FromArgb(250, 250, 250);
     internal static readonly Color Muted = Color.FromArgb(178, 178, 178);

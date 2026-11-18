@@ -1,0 +1,13 @@
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\bin\Release\net10.0-windows\SoundDock.exe
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\bin\Release\net10.0-windows\SoundDock.deps.json
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\bin\Release\net10.0-windows\SoundDock.runtimeconfig.json
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\bin\Release\net10.0-windows\SoundDock.dll
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.AssemblyInfoInputs.cache
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.AssemblyInfo.cs
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.csproj.CoreCompileInputs.cache
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.dll
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\refint\SoundDock.dll
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.genruntimeconfig.cache
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\ref\SoundDock.dll
+C:\Users\Ryan\Desktop\SoundDock\SoundDock\obj\Release\net10.0-windows\SoundDock.csproj.Up2Date

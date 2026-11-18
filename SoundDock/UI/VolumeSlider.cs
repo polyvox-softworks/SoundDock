@@ -90,7 +90,7 @@ public sealed class VolumeSlider : Control
 
         float y = Height / 2f;
         float x = TrackStart + (TrackEnd - TrackStart) * _value / 100f;
-        float thickness = Math.Max(2f, 3.5f * DpiScale);
+        float thickness = Math.Max(2f, 4.5f * DpiScale);
         using var trackPen = new Pen(track, thickness) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         using var fillPen = new Pen(accent, thickness) { StartCap = LineCap.Round, EndCap = LineCap.Round };
         if (TrackEnd > TrackStart)
@@ -100,9 +100,11 @@ public sealed class VolumeSlider : Control
                 graphics.DrawLine(fillPen, TrackStart, y, x, y);
         }
 
-        float radius = (_hovered || Capture ? 5.8f : 5f) * DpiScale;
+        float radius = (_hovered || Capture ? 7.2f : 6.7f) * DpiScale;
         using var thumbBrush = new SolidBrush(thumb);
+        using var thumbOutline = new Pen(accent, Math.Max(1.5f, 2.1f * DpiScale));
         graphics.FillEllipse(thumbBrush, x - radius, y - radius, radius * 2f, radius * 2f);
+        graphics.DrawEllipse(thumbOutline, x - radius, y - radius, radius * 2f, radius * 2f);
 
         if (Focused && ShowFocusCues && Enabled)
         {
