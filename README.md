@@ -7,7 +7,7 @@
 
   **Windows 10 / 11** &nbsp;|&nbsp; **Portable** 
 
-  [Website](https://polyvox.dev/SoundDock/)
+  [Website](https://polyvox.dev/)
 </div>
 
 ## Why SoundDock?
