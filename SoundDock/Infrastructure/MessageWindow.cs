@@ -71,6 +71,9 @@ internal sealed class MessageWindow : NativeWindow, IDisposable
             message.Result = IntPtr.Zero;
             return;
         }
+        // Refresh after monitor hotplug, display scaling and taskbar-setting changes.
+        if (message.Msg is 0x007E or 0x001A or 0x02E0)
+            _refreshPlacement();
         // Windows broadcasts these when Personalization -> Colors changes.
         if (message.Msg is 0x0320 or 0x001A or 0x031A)
             _refreshAccent();

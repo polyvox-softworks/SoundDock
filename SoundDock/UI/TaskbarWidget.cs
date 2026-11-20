@@ -9,13 +9,15 @@ using SoundDock.Infrastructure;
 namespace SoundDock.UI;
 
 /// <summary>
-/// An app-owned layered child of Explorer's primary taskbar. It is deliberately
-/// separate from Shell_NotifyIcon and can never enter the notification overflow.
-/// Explorer's window classes are implementation details, so a visible floating
-/// control is used when the expected taskbar hierarchy is not available.
+/// An app-owned layered child of Explorer's taskbar on a specific display.
+/// It never registers a Shell_NotifyIcon, so it cannot enter notification overflow.
+/// Explorer's windows are private implementation details; the primary display
+/// retains a floating fallback if attachment fails.
 /// </summary>
 internal sealed class TaskbarWidget : IDisposable
 {
+    private readonly string _displayName;
+    private readonly bool _allowFloatingFallback;
     private WidgetWindow? _window;
     private IntPtr _parent;
     private IntPtr _tooltip;
@@ -36,6 +38,16 @@ internal sealed class TaskbarWidget : IDisposable
     private int _dpi = 96;
     private int _wheelRemainder;
     private DateTime _lastFailureLog;
+
+    internal TaskbarWidget(string displayName, bool allowFloatingFallback)
+    {
+        _displayName = displayName;
+        _allowFloatingFallback = allowFloatingFallback;
+    }
+
+    private Screen TargetScreen => Screen.AllScreens.FirstOrDefault(screen =>
+        string.Equals(screen.DeviceName, _displayName, StringComparison.OrdinalIgnoreCase))
+        ?? Screen.PrimaryScreen ?? Screen.AllScreens[0];
 
     public event Action<Point>? OpenRequested;
     public event Action? ToggleMuteRequested;
@@ -59,7 +71,7 @@ internal sealed class TaskbarWidget : IDisposable
                 bool top = bounds.Bottom <= screen.WorkingArea.Top + S(8);
                 return new Point(bounds.Right - S(8), top ? bounds.Bottom : bounds.Top);
             }
-            var work = (Screen.PrimaryScreen ?? Screen.AllScreens[0]).WorkingArea;
+            var work = TargetScreen.WorkingArea;
             return new Point(work.Right - S(20), work.Bottom - S(10));
         }
     }
@@ -106,12 +118,16 @@ internal sealed class TaskbarWidget : IDisposable
                 LogPlacementFailure(ex);
                 reason = "Taskbar attachment unavailable; showing a floating volume control.";
             }
-            ShowFloating(reason);
+            if (_allowFloatingFallback)
+                ShowFloating(reason);
+            else
+                HideUnavailable(reason);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or ExternalException)
         {
             LogPlacementFailure(ex);
-            PlacementStatus = "Widget unavailable. Run SoundDock again to open the mixer.";
+            if (!_allowFloatingFallback) DestroyWindow();
+            PlacementStatus = "Taskbar indicator unavailable on this display.";
         }
         finally { _refreshing = false; }
     }
@@ -119,17 +135,14 @@ internal sealed class TaskbarWidget : IDisposable
     private bool TryAttach(out string reason)
     {
         reason = "Taskbar not available; showing a floating volume control.";
-        IntPtr taskbar = WidgetNative.FindWindow("Shell_TrayWnd", null);
-        if (taskbar == IntPtr.Zero || !WidgetNative.GetWindowRect(taskbar, out var taskbarNative)) return false;
-        Rectangle taskbarBounds = taskbarNative.ToRectangle();
-        if (taskbarBounds.Width <= 0 || taskbarBounds.Height <= 0) return false;
-
-        IntPtr notification = FindNotificationWindow(taskbar);
-        if (notification == IntPtr.Zero || !WidgetNative.GetWindowRect(notification, out var notificationNative))
+        IntPtr taskbar = TaskbarWindowLocator.FindForDisplay(_displayName);
+        if (taskbar == IntPtr.Zero || !WidgetNative.GetWindowRect(taskbar, out var taskbarNative))
         {
-            reason = "This taskbar layout is not recognized; showing a floating volume control.";
+            reason = "Windows does not have an active taskbar on this display.";
             return false;
         }
+        Rectangle taskbarBounds = taskbarNative.ToRectangle();
+        if (taskbarBounds.Width <= 0 || taskbarBounds.Height <= 0) return false;
 
         bool vertical = taskbarBounds.Width < taskbarBounds.Height;
         int dpi = checked((int)WidgetNative.GetDpiForWindow(taskbar));
@@ -137,12 +150,28 @@ internal sealed class TaskbarWidget : IDisposable
         _needsRender |= dpi != _dpi || vertical != _vertical;
         _dpi = dpi;
         _vertical = vertical;
+        Rectangle notificationBounds;
+        IntPtr notification = FindNotificationWindow(taskbar);
+        if (notification != IntPtr.Zero && WidgetNative.GetWindowRect(notification, out var notificationNative))
+            notificationBounds = notificationNative.ToRectangle();
+        else if (_allowFloatingFallback)
+        {
+            reason = "This taskbar layout is not recognized; showing a floating volume control.";
+            return false;
+        }
+        else
+        {
+            // Secondary Windows 11 taskbars typically do not expose TrayNotifyWnd.
+            // Anchor before the clock if present, otherwise near the end of the bar.
+            notificationBounds = FindSecondaryAnchor(taskbar, taskbarBounds, vertical);
+        }
+
         // The reference battery indicators fill most of a 48-pixel taskbar.
         // Size from the actual label so "Desk" stays compact while a monitor
         // name gets enough room. Never stretch a small rendered bitmap.
         var size = DesiredSize(taskbarBounds, vertical);
         var obstacles = FindOtherWidgets(taskbar, taskbarBounds);
-        var bounds = TaskbarPlacement.Calculate(taskbarBounds, notificationNative.ToRectangle(), obstacles,
+        var bounds = TaskbarPlacement.Calculate(taskbarBounds, notificationBounds, obstacles,
             size, S(4), S(_offset));
         if (bounds.IsEmpty)
         {
@@ -158,6 +187,15 @@ internal sealed class TaskbarWidget : IDisposable
         return true;
     }
 
+    private void HideUnavailable(string reason)
+    {
+        // A secondary widget should not float over applications if Windows has
+        // no taskbar there (for example, "Show taskbar on all displays" is off).
+        DestroyWindow();
+        _floating = false;
+        PlacementStatus = reason;
+    }
+
     private void ShowFloating(string reason)
     {
         // A fallback stays outside the hidden-icon menu. No NotifyIcon is created.
@@ -170,7 +208,7 @@ internal sealed class TaskbarWidget : IDisposable
         _dpi = dpi > 0 ? dpi : 96;
         EnsureWindow(IntPtr.Zero);
         PlacementStatus = reason;
-        var screen = Screen.PrimaryScreen ?? Screen.AllScreens[0];
+        var screen = TargetScreen;
         var work = screen.WorkingArea;
         var size = DesiredSize(new Rectangle(0, 0, S(400), S(48)), vertical: false);
         int x = Math.Max(work.Left + S(8), work.Right - size.Width - S(12) - S(_offset));
@@ -256,6 +294,30 @@ internal sealed class TaskbarWidget : IDisposable
             return false;
         }, IntPtr.Zero);
         return found;
+    }
+
+    private Rectangle FindSecondaryAnchor(IntPtr taskbar, Rectangle bounds, bool vertical)
+    {
+        IntPtr clock = IntPtr.Zero;
+        WidgetNative.EnumChildWindows(taskbar, (window, _) =>
+        {
+            if (WindowClass(window) != "TrayClockWClass" ||
+                !WidgetNative.IsWindowVisible(window) ||
+                !WidgetNative.GetWindowRect(window, out var clockRect)) return true;
+            if (Rectangle.Intersect(bounds, clockRect.ToRectangle()).IsEmpty) return true;
+            clock = window;
+            return false;
+        }, IntPtr.Zero);
+        if (clock != IntPtr.Zero && WidgetNative.GetWindowRect(clock, out var native))
+            return native.ToRectangle();
+
+        // Newer Windows taskbars can draw the clock in a composition surface
+        // without exposing a separate clock HWND. Leave room for it by default.
+        // This zero-width rectangle is only a placement anchor, not a window.
+        int reserved = S(vertical ? 76 : 100);
+        return vertical
+            ? new Rectangle(bounds.Left, Math.Max(bounds.Top, bounds.Bottom - reserved), bounds.Width, 0)
+            : new Rectangle(Math.Max(bounds.Left, bounds.Right - reserved), bounds.Top, 0, bounds.Height);
     }
 
     private static List<Rectangle> FindOtherWidgets(IntPtr taskbar, Rectangle taskbarBounds)

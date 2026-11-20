@@ -9,6 +9,13 @@ internal sealed class AppSettings
     public bool HasOpened { get; set; }
     public bool StartupInitialized { get; set; }
 
+    // All = every enabled taskbar, Primary = main taskbar, Selected = one display.
+    // Existing installations default to All without changing their other settings.
+    public string TaskbarDisplayMode { get; set; } = "All";
+    public string SelectedTaskbarDisplay { get; set; } = "";
+    public Dictionary<string, int> DisplayOffsets { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+
     // Audio endpoint IDs remain stable across ordinary reboots. Users can give
     // verbose Windows device names short labels like "Desk" or "Headset".
     public Dictionary<string, string> OutputLabels { get; set; } = new(StringComparer.Ordinal);

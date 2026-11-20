@@ -14,7 +14,7 @@ internal sealed class AudioAppContext : ApplicationContext
     private readonly EndpointVolumeWatcher _volumeWatcher;
     private readonly AppSettings _settings = SettingsStore.Load();
     private readonly MixerFlyout _flyout = new();
-    private readonly TaskbarWidget _widget = new();
+    private readonly TaskbarWidgetHost _widget = new();
     private readonly ContextMenuStrip _menu;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 1500 };
     private readonly MessageWindow _messageWindow;
@@ -24,12 +24,14 @@ internal sealed class AudioAppContext : ApplicationContext
     private readonly ToolStripMenuItem _resetOutputItem;
     private readonly ToolStripMenuItem _callsItem;
     private readonly ToolStripMenuItem _startupItem;
+    private readonly ToolStripMenuItem _displayMenu;
     private readonly ToolStripMenuItem _moveLeftItem;
     private readonly ToolStripMenuItem _moveRightItem;
     private readonly ToolStripMenuItem _resetPlacementItem;
     private readonly ToolStripMenuItem _placementStatusItem;
     private AudioSnapshot _snapshot = AudioSnapshot.Empty();
     private long _lastDismissedAt;
+    private string? _flyoutDisplay;
     private bool _widgetDisposed;
     private bool _disposed;
 
@@ -37,6 +39,10 @@ internal sealed class AudioAppContext : ApplicationContext
     {
         _settings.OutputLabels ??= new Dictionary<string, string>(StringComparer.Ordinal);
         _settings.HiddenOutputs ??= new Dictionary<string, string>(StringComparer.Ordinal);
+        _settings.DisplayOffsets ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        _settings.TaskbarDisplayMode = _settings.TaskbarDisplayMode is "Primary" or "Selected"
+            ? _settings.TaskbarDisplayMode : "All";
+        _settings.SelectedTaskbarDisplay ??= "";
         InitializeStartup();
         _messageWindow = new MessageWindow(ShowFlyout, RefreshWidgetPlacement,
             ShowErrorFlyout, HandleVolumeNotification, RefreshWindowsAccent);
@@ -80,6 +86,8 @@ internal sealed class AudioAppContext : ApplicationContext
             SaveSettings();
         };
         _startupItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true };
+        _displayMenu = new ToolStripMenuItem("Taskbar displays");
+        _displayMenu.DropDownOpening += (_, _) => RefreshDisplayMenu();
         _startupItem.Click += (_, _) => ChangeStartup();
 
         _moveLeftItem = new ToolStripMenuItem("Move left", null, (_, _) => ChangePlacement(8));
@@ -88,7 +96,7 @@ internal sealed class AudioAppContext : ApplicationContext
         _placementStatusItem = new ToolStripMenuItem { Enabled = false, Visible = false };
         var placement = new ToolStripMenuItem("Position")
         {
-            ToolTipText = "Adjust spacing beside other taskbar widgets."
+            ToolTipText = "Adjust this monitor's SoundDock indicator."
         };
         placement.DropDownItems.AddRange([
             _moveLeftItem, _moveRightItem, new ToolStripSeparator(), _resetPlacementItem,
@@ -100,7 +108,7 @@ internal sealed class AudioAppContext : ApplicationContext
             openItem, _muteItem,
             new ToolStripSeparator(),
             _percentageItem, _renameOutputItem, _resetOutputItem,
-            placement, _callsItem, _startupItem,
+            placement, _displayMenu, _callsItem, _startupItem,
             new ToolStripSeparator(),
             new ToolStripMenuItem("Windows sound settings", null, (_, _) => OpenSoundSettings()),
             new ToolStripSeparator(),
@@ -108,6 +116,7 @@ internal sealed class AudioAppContext : ApplicationContext
         ]);
         _menu.Opening += MenuOpening;
 
+        _widget.ConfigureDisplays(_settings.TaskbarDisplayMode, _settings.SelectedTaskbarDisplay);
         _widget.OpenRequested += WidgetOpenRequested;
         _widget.ToggleMuteRequested += ToggleMasterMute;
         _widget.MenuRequested += ShowMenu;
@@ -180,12 +189,19 @@ internal sealed class AudioAppContext : ApplicationContext
         if (_disposed) return;
         if (_flyout.Visible)
         {
+            bool differentDisplay = !string.Equals(_flyoutDisplay,
+                Screen.FromPoint(anchor).DeviceName, StringComparison.OrdinalIgnoreCase);
             _flyout.Dismiss();
+            if (differentDisplay) ShowFlyoutAt(anchor);
             return;
         }
 
-        // Ignore the click that just dismissed the flyout.
-        if (Environment.TickCount64 - _lastDismissedAt <= 250) return;
+        // A click on another monitor should open there even if Windows just
+        // dismissed the flyout due to focus loss. The debounce only applies
+        // to clicks on the same display.
+        bool sameDisplay = string.Equals(_flyoutDisplay,
+            Screen.FromPoint(anchor).DeviceName, StringComparison.OrdinalIgnoreCase);
+        if (sameDisplay && Environment.TickCount64 - _lastDismissedAt <= 250) return;
         ShowFlyoutAt(anchor);
     }
 
@@ -209,6 +225,7 @@ internal sealed class AudioAppContext : ApplicationContext
         _menu.Close();
         RefreshState(includeSessions: true, forceApply: true);
         _flyout.ShowNear(anchor);
+        _flyoutDisplay = Screen.FromPoint(anchor).DeviceName;
         if (!_settings.HasOpened)
         {
             _settings.HasOpened = true;
@@ -273,7 +290,7 @@ internal sealed class AudioAppContext : ApplicationContext
     {
         if (_disposed || _widgetDisposed) return;
         _widget.SetState(_snapshot, _settings.ShowPercentage, _settings.WidgetOffset,
-            OutputLabel.For(_snapshot, _settings.OutputLabels));
+            OutputLabel.For(_snapshot, _settings.OutputLabels), _settings.DisplayOffsets);
     }
 
     private void RefreshWidgetPlacement()
@@ -328,22 +345,77 @@ internal sealed class AudioAppContext : ApplicationContext
         SaveSettings();
     }
 
-    private void ChangePlacement(int adjustment) => SetPlacement(_settings.WidgetOffset + adjustment);
+    private int ActivePlacementOffset()
+    {
+        string display = _widget.ActiveDisplayName;
+        if (_settings.DisplayOffsets.TryGetValue(display, out int offset)) return offset;
+        return Screen.AllScreens.Any(screen => screen.Primary &&
+            string.Equals(screen.DeviceName, display, StringComparison.OrdinalIgnoreCase))
+            ? _settings.WidgetOffset : 0;
+    }
+
+    private void ChangePlacement(int adjustment) => SetPlacement(ActivePlacementOffset() + adjustment);
 
     private void SetPlacement(int offset)
     {
-        _settings.WidgetOffset = offset;
+        string display = _widget.ActiveDisplayName;
+        int clamped = Math.Clamp(offset, 0, 2000);
+        _settings.DisplayOffsets[display] = clamped;
+        if (Screen.AllScreens.Any(screen => screen.Primary &&
+            string.Equals(screen.DeviceName, display, StringComparison.OrdinalIgnoreCase)))
+            _settings.WidgetOffset = clamped;
         UpdateWidget();
         RefreshWidgetPlacement();
         RefreshPlacementItems();
         SaveSettings();
     }
 
+    private void RefreshDisplayMenu()
+    {
+        _displayMenu.DropDownItems.Clear();
+        AddDisplayChoice("All taskbars", "All", "", true);
+        AddDisplayChoice("Primary taskbar only", "Primary", "", true);
+        _displayMenu.DropDownItems.Add(new ToolStripSeparator());
+
+        var screens = Screen.AllScreens.OrderByDescending(screen => screen.Primary)
+            .ThenBy(screen => screen.Bounds.Left).ThenBy(screen => screen.Bounds.Top).ToArray();
+        for (int i = 0; i < screens.Length; i++)
+        {
+            var screen = screens[i];
+            bool available = screen.Primary ||
+                TaskbarWindowLocator.FindForDisplay(screen.DeviceName) != IntPtr.Zero;
+            string display = screen.DeviceName.Replace(@"\\.\", "", StringComparison.Ordinal);
+            string label = $"Display {i + 1} ({display})" + (screen.Primary ? " - primary" : "");
+            AddDisplayChoice(label, "Selected", screen.DeviceName, available);
+        }
+    }
+
+    private void AddDisplayChoice(string text, string mode, string displayName, bool enabled)
+    {
+        var item = new ToolStripMenuItem(text)
+        {
+            Checked = _settings.TaskbarDisplayMode == mode &&
+                (mode != "Selected" || string.Equals(_settings.SelectedTaskbarDisplay,
+                    displayName, StringComparison.OrdinalIgnoreCase)),
+            Enabled = enabled,
+            ToolTipText = enabled ? "" : "Enable the taskbar on this display in Windows taskbar settings."
+        };
+        item.Click += (_, _) =>
+        {
+            _settings.TaskbarDisplayMode = mode;
+            _settings.SelectedTaskbarDisplay = displayName;
+            _widget.ConfigureDisplays(mode, displayName);
+            SaveSettings();
+        };
+        _displayMenu.DropDownItems.Add(item);
+    }
+
     private void RefreshPlacementItems()
     {
-        _moveLeftItem.Enabled = _settings.WidgetOffset < 2000;
-        _moveRightItem.Enabled = _settings.WidgetOffset > 0;
-        _resetPlacementItem.Enabled = _settings.WidgetOffset != 0;
+        int offset = ActivePlacementOffset();
+        _moveLeftItem.Enabled = offset < 2000;
+        _moveRightItem.Enabled = offset > 0;
+        _resetPlacementItem.Enabled = offset != 0;
         _placementStatusItem.Visible = !_widget.IsAttached && !string.IsNullOrEmpty(_widget.PlacementStatus);
         _placementStatusItem.Text = "Floating indicator is active";
         _placementStatusItem.ToolTipText = _widget.PlacementStatus ?? "";
